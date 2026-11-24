@@ -12,6 +12,9 @@ An interactive N-Body Orbital Gravity & Spacetime Sandbox running in a single se
 ## Running Locally
 Open `index.html` in any modern web browser. No installation or external dependencies required.
 
+## Visual mode
+Cinematic rendering is on by default: a parallax starfield, nebula backdrop, sprite glows, shaded planets, tinted gravity grid, brighter orbital trails, and a rotating black-hole disk. The **FX** button in the Visuals row turns those effects off and restores the flat baseline look. Gravity, collisions, presets, and controls are unchanged.
+
 
 
 ## Project status

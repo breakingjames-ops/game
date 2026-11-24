@@ -6,21 +6,21 @@
   <title>Astralis | N-Body Orbital Gravity & Spacetime Sandbox</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
-    body, html { width: 100%; height: 100%; overflow: hidden; background: #050608; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace; color: #d1d5db; }
+    body, html { width: 100%; height: 100%; overflow: hidden; background: #05060e; font-family: ui-sans-serif, system-ui, "Segoe UI", sans-serif; color: #e5e7eb; }
     #canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; }
     
     .panel {
-      position: absolute; background: rgba(13, 17, 23, 0.85); backdrop-filter: blur(10px);
-      border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; padding: 12px 16px;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5); z-index: 10;
+      position: absolute; background: rgba(8, 12, 22, 0.8); backdrop-filter: blur(12px);
+      border: 1px solid rgba(148, 197, 255, 0.18); border-radius: 10px; padding: 12px 16px;
+      box-shadow: 0 10px 32px rgba(0, 0, 0, 0.48), inset 0 1px 0 rgba(255, 255, 255, 0.06); z-index: 10;
     }
     #top-bar { top: 16px; left: 16px; display: flex; align-items: center; gap: 12px; }
-    #stats-bar { top: 16px; right: 16px; font-size: 12px; font-family: monospace; display: flex; gap: 14px; }
+    #stats-bar { top: 16px; right: 16px; font-size: 12px; font-family: ui-monospace, monospace; font-variant-numeric: tabular-nums; display: flex; gap: 14px; color: #cbd5e1; }
     #controls { bottom: 16px; left: 16px; display: flex; flex-direction: column; gap: 10px; width: 280px; }
     #archetypes { bottom: 16px; right: 16px; display: flex; gap: 8px; }
 
-    h1 { font-size: 15px; font-weight: 700; color: #f9fafb; letter-spacing: 0.05em; text-transform: uppercase; margin: 0; }
-    .badge { font-size: 10px; background: #2563eb; color: #fff; padding: 2px 6px; border-radius: 4px; text-transform: uppercase; }
+    h1 { font-size: 15px; font-weight: 700; color: #f8fafc; letter-spacing: 0.14em; text-transform: uppercase; margin: 0; text-shadow: 0 0 14px rgba(56, 189, 248, 0.4); }
+    .badge { font-size: 10px; background: transparent; color: #7dd3fc; border: 1px solid rgba(125, 211, 252, 0.5); padding: 2px 6px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.08em; }
 
     button, select {
       background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.15);
@@ -28,7 +28,7 @@
       transition: all 0.2s ease; outline: none;
     }
     button:hover, select:hover { background: rgba(255, 255, 255, 0.18); border-color: rgba(255, 255, 255, 0.3); }
-    button.active { background: #3b82f6; border-color: #60a5fa; color: #fff; font-weight: 600; }
+    button.active { background: #0e7490; border-color: #22d3ee; color: #f0fdfa; font-weight: 600; }
     
     .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; }
     .btn-group { display: flex; gap: 6px; width: 100%; }
@@ -83,6 +83,7 @@
       <div class="btn-group">
         <button id="btn-grid" class="active">Grid</button>
         <button id="btn-trails" class="active">Trails</button>
+        <button id="btn-fx" class="active" title="Toggle cinematic starfield, glows, and shading">FX</button>
         <button id="btn-audio">Audio</button>
       </div>
     </div>
@@ -136,6 +137,7 @@
       collisionMode: "merge",
       showGrid: true,
       showTrails: true,
+      cinematic: true,
       audioEnabled: false,
       selectedArchetype: "asteroid",
       camera: { x: 0, y: 0, zoom: 1.0 },
@@ -160,8 +162,194 @@
       canvas.height = hudCanvas.height = window.innerHeight;
       state.camera.x = canvas.width / 2;
       state.camera.y = canvas.height / 2;
+      if (typeof rebuildBackground === "function") rebuildBackground();
     }
     window.addEventListener("resize", resize);
+
+    /* =========================================================================
+       MODULE 1b: CINEMATIC ASSETS (allocated once, reused every frame)
+       ========================================================================= */
+    const STAR_N = 240;
+    const starNX = new Float32Array(STAR_N);
+    const starNY = new Float32Array(STAR_N);
+    const starPhase = new Float32Array(STAR_N);
+    const starSpeed = new Float32Array(STAR_N);
+    const starSize = new Float32Array(STAR_N);
+    const starLayer = new Uint8Array(STAR_N);
+    const STAR_TINTS = ["#f8fafc", "#dbeafe", "#fde68a"];
+
+    const GRID_STYLES = [
+      "rgba(125, 148, 176, 0.13)",
+      "rgba(96, 176, 206, 0.20)",
+      "rgba(72, 196, 214, 0.28)",
+      "rgba(129, 162, 255, 0.36)",
+      "rgba(186, 146, 255, 0.46)"
+    ];
+    const GRID_STYLE_FLAT = "rgba(75, 85, 99, 0.22)";
+    const PHOTON_RING = "rgba(216, 180, 254, 0.9)";
+    const HORIZON_EDGE = "rgba(255, 255, 255, 0.38)";
+    const GAS_BAND = "rgba(255, 255, 255, 0.85)";
+    const ASTEROID_HL = "rgba(255, 255, 255, 0.35)";
+    const STAR_CORE = "#fff7ed";
+    const BH_GLOW = "#a855f7";
+
+    let warpDx = 0;
+    let warpDy = 0;
+    let warpMag = 0;
+    let visualTime = 0;
+    let bgCanvas = null;
+    let sphereSprite = null;
+    let diskSprite = null;
+    const glowCache = new Map();
+
+    function initStarfield() {
+      for (let i = 0; i < STAR_N; i++) {
+        starNX[i] = Math.random();
+        starNY[i] = Math.random();
+        starPhase[i] = Math.random() * Math.PI * 2;
+        starSpeed[i] = 0.6 + Math.random() * 1.8;
+        const layer = (i % 11 === 0) ? 2 : (i % 3 === 0) ? 1 : 0;
+        starLayer[i] = layer;
+        starSize[i] = layer === 2 ? 2.1 : layer === 1 ? 1.35 : 0.85;
+      }
+    }
+
+    function bakeGlow(color) {
+      const size = 128;
+      const c = document.createElement("canvas");
+      c.width = size;
+      c.height = size;
+      const g = c.getContext("2d");
+      const r = size / 2;
+      const grad = g.createRadialGradient(r, r, 0, r, r, r);
+      grad.addColorStop(0, "rgba(255,255,255,0.95)");
+      grad.addColorStop(0.22, "rgba(255,255,255,0.55)");
+      grad.addColorStop(0.55, "rgba(255,255,255,0.14)");
+      grad.addColorStop(1, "rgba(255,255,255,0)");
+      g.fillStyle = grad;
+      g.fillRect(0, 0, size, size);
+      g.globalCompositeOperation = "source-in";
+      g.fillStyle = color;
+      g.fillRect(0, 0, size, size);
+      return c;
+    }
+
+    function glowFor(color) {
+      let sprite = glowCache.get(color);
+      if (!sprite) {
+        sprite = bakeGlow(color);
+        glowCache.set(color, sprite);
+      }
+      return sprite;
+    }
+
+    function bakeSphere() {
+      const size = 128;
+      const c = document.createElement("canvas");
+      c.width = size;
+      c.height = size;
+      const g = c.getContext("2d");
+      const r = size / 2;
+      const light = g.createRadialGradient(r * 0.62, r * 0.55, r * 0.04, r * 0.62, r * 0.55, r * 0.95);
+      light.addColorStop(0, "rgba(255,255,255,0.72)");
+      light.addColorStop(0.42, "rgba(255,255,255,0.08)");
+      light.addColorStop(1, "rgba(255,255,255,0)");
+      g.fillStyle = light;
+      g.beginPath();
+      g.arc(r, r, r, 0, Math.PI * 2);
+      g.fill();
+      const rim = g.createRadialGradient(r, r, r * 0.55, r, r, r);
+      rim.addColorStop(0, "rgba(0,0,0,0)");
+      rim.addColorStop(0.72, "rgba(0,0,0,0.08)");
+      rim.addColorStop(1, "rgba(0,0,0,0.62)");
+      g.fillStyle = rim;
+      g.beginPath();
+      g.arc(r, r, r, 0, Math.PI * 2);
+      g.fill();
+      return c;
+    }
+
+    function bakeDisk() {
+      const size = 256;
+      const c = document.createElement("canvas");
+      c.width = size;
+      c.height = size;
+      const g = c.getContext("2d");
+      const cx = size / 2;
+      const cy = size / 2;
+      for (let i = 0; i < 56; i++) {
+        const a0 = (i / 56) * Math.PI * 2;
+        const hot = 0.35 + 0.65 * (0.5 + 0.5 * Math.cos(a0));
+        g.strokeStyle = "rgba(253, 186, 116, " + (0.12 + hot * 0.72).toFixed(3) + ")";
+        g.lineWidth = 8;
+        g.beginPath();
+        g.arc(cx, cy, 74, a0, a0 + 0.14);
+        g.stroke();
+        g.strokeStyle = "rgba(167, 139, 250, " + (0.04 + hot * 0.28).toFixed(3) + ")";
+        g.lineWidth = 18;
+        g.beginPath();
+        g.arc(cx, cy, 90, a0, a0 + 0.14);
+        g.stroke();
+      }
+      g.globalCompositeOperation = "destination-out";
+      g.beginPath();
+      g.arc(cx, cy, 42, 0, Math.PI * 2);
+      g.fill();
+      return c;
+    }
+
+    function rebuildBackground() {
+      const pad = 24;
+      const w = canvas.width + pad * 2;
+      const h = canvas.height + pad * 2;
+      if (w < 2 || h < 2) return;
+      bgCanvas = document.createElement("canvas");
+      bgCanvas.width = w;
+      bgCanvas.height = h;
+      const g = bgCanvas.getContext("2d");
+      g.fillStyle = "#05060e";
+      g.fillRect(0, 0, w, h);
+
+      function blob(px, py, radius, color) {
+        const grad = g.createRadialGradient(px, py, 0, px, py, radius);
+        grad.addColorStop(0, color);
+        grad.addColorStop(1, "rgba(0,0,0,0)");
+        g.fillStyle = grad;
+        g.fillRect(px - radius, py - radius, radius * 2, radius * 2);
+      }
+
+      blob(w * 0.22, h * 0.28, Math.max(w, h) * 0.42, "rgba(76, 29, 149, 0.34)");
+      blob(w * 0.78, h * 0.72, Math.max(w, h) * 0.38, "rgba(14, 116, 144, 0.22)");
+      blob(w * 0.55, h * 0.42, Math.max(w, h) * 0.28, "rgba(30, 64, 175, 0.20)");
+
+      g.save();
+      g.translate(w * 0.5, h * 0.48);
+      g.rotate(-0.35);
+      g.scale(1, 0.22);
+      const band = g.createRadialGradient(0, 0, 20, 0, 0, w * 0.55);
+      band.addColorStop(0, "rgba(186, 210, 255, 0.10)");
+      band.addColorStop(1, "rgba(186, 210, 255, 0)");
+      g.fillStyle = band;
+      g.beginPath();
+      g.arc(0, 0, w * 0.55, 0, Math.PI * 2);
+      g.fill();
+      g.restore();
+
+      const vignette = g.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.28, w / 2, h / 2, Math.max(w, h) * 0.72);
+      vignette.addColorStop(0, "rgba(0,0,0,0)");
+      vignette.addColorStop(1, "rgba(0,0,0,0.62)");
+      g.fillStyle = vignette;
+      g.fillRect(0, 0, w, h);
+    }
+
+    function initCinematicAssets() {
+      initStarfield();
+      sphereSprite = bakeSphere();
+      diskSprite = bakeDisk();
+      const prewarm = ["#f97316", "#38bdf8", "#fbbf24", "#34d399", "#ec4899", "#3b82f6", "#10b981", "#fcd34d", "#f87171", BH_GLOW];
+      for (let i = 0; i < prewarm.length; i++) glowFor(prewarm[i]);
+    }
+    initCinematicAssets();
     resize();
 
     /* =========================================================================
@@ -409,87 +597,293 @@
 
     /* =========================================================================
        MODULE 6: RENDERING & VISUAL PIPELINE
+       Cinematic sprites, star buffers, and grid scratch values are allocated
+       once. This path does not allocate per sample or per body.
        ========================================================================= */
-    function draw() {
-      ctx.fillStyle = "#050608";
+    function warpBucket() {
+      const m = warpMag;
+      if (m < 0.35) return 0;
+      if (m < 0.9) return 1;
+      if (m < 2.2) return 2;
+      if (m < 5) return 3;
+      return 4;
+    }
+
+    function drawBackdrop() {
+      const pad = 24;
+      const driftX = Math.sin(visualTime * 0.07) * 10;
+      const driftY = Math.cos(visualTime * 0.05) * 8;
+      ctx.fillStyle = "#05060e";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
+      if (bgCanvas) ctx.drawImage(bgCanvas, -pad + driftX, -pad + driftY);
+      drawStarfield();
+    }
 
-      ctx.save();
-      ctx.translate(state.camera.x, state.camera.y);
-      ctx.scale(state.camera.zoom, state.camera.zoom);
-
-      if (state.showGrid) {
-        ctx.strokeStyle = "rgba(75, 85, 99, 0.22)";
-        ctx.lineWidth = 1 / state.camera.zoom;
-        const gridSize = 45;
-        const range = 1400;
-
-        for (let x = -range; x <= range; x += gridSize) {
-          ctx.beginPath();
-          for (let y = -range; y <= range; y += 20) {
-            let offset = computeGridWarp(x, y);
-            if (y === -range) ctx.moveTo(x + offset.dx, y + offset.dy);
-            else ctx.lineTo(x + offset.dx, y + offset.dy);
-          }
-          ctx.stroke();
+    function drawStarfield() {
+      const w = canvas.width;
+      const h = canvas.height;
+      const ox = state.camera.x - w * 0.5;
+      const oy = state.camera.y - h * 0.5;
+      const zoomPull = (state.camera.zoom - 1) * 16;
+      let tint = -1;
+      for (let i = 0; i < STAR_N; i++) {
+        const layer = starLayer[i];
+        const depth = layer === 0 ? 0.03 : layer === 1 ? 0.1 : 0.24;
+        let sx = starNX[i] * w - ox * depth - zoomPull * depth;
+        let sy = starNY[i] * h - oy * depth;
+        sx %= w;
+        if (sx < 0) sx += w;
+        sy %= h;
+        if (sy < 0) sy += h;
+        const want = layer === 2 ? (i % 3) : 0;
+        if (want !== tint) {
+          tint = want;
+          ctx.fillStyle = STAR_TINTS[want];
         }
-
-        for (let y = -range; y <= range; y += gridSize) {
-          ctx.beginPath();
-          for (let x = -range; x <= range; x += 20) {
-            let offset = computeGridWarp(x, y);
-            if (x === -range) ctx.moveTo(x + offset.dx, y + offset.dy);
-            else ctx.lineTo(x + offset.dx, y + offset.dy);
-          }
-          ctx.stroke();
+        const tw = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(visualTime * starSpeed[i] + starPhase[i]));
+        const size = starSize[i];
+        ctx.globalAlpha = layer === 0 ? tw * 0.4 : layer === 1 ? tw * 0.72 : tw;
+        ctx.fillRect(sx, sy, size, size);
+        if (layer === 2) {
+          ctx.globalAlpha *= 0.4;
+          ctx.fillRect(sx - 2.4, sy + size * 0.3, size + 4.8, 0.7);
+          ctx.fillRect(sx + size * 0.3, sy - 2.4, 0.7, size + 4.8);
         }
       }
+      ctx.globalAlpha = 1;
+    }
 
-      if (state.showTrails) {
-        for (let b of bodies) {
-          if (b.trail.length < 2) continue;
-          ctx.beginPath();
-          ctx.strokeStyle = b.color;
-          ctx.lineWidth = 1.2 / state.camera.zoom;
+    function drawGrid() {
+      const zoom = state.camera.zoom;
+      const cinematic = state.cinematic;
+      ctx.lineWidth = 1 / zoom;
+      ctx.lineCap = cinematic ? "round" : "butt";
+      ctx.lineJoin = cinematic ? "round" : "miter";
+      if (!cinematic) ctx.strokeStyle = GRID_STYLE_FLAT;
+      const gridSize = 45;
+      const range = 1400;
+
+      for (let x = -range; x <= range; x += gridSize) {
+        ctx.beginPath();
+        let maxB = 0;
+        for (let y = -range; y <= range; y += 20) {
+          computeGridWarp(x, y);
+          if (cinematic) {
+            const bkt = warpBucket();
+            if (bkt > maxB) maxB = bkt;
+          }
+          if (y === -range) ctx.moveTo(x + warpDx, y + warpDy);
+          else ctx.lineTo(x + warpDx, y + warpDy);
+        }
+        if (cinematic) ctx.strokeStyle = GRID_STYLES[maxB];
+        ctx.stroke();
+      }
+
+      for (let y = -range; y <= range; y += gridSize) {
+        ctx.beginPath();
+        let maxB = 0;
+        for (let x = -range; x <= range; x += 20) {
+          computeGridWarp(x, y);
+          if (cinematic) {
+            const bkt = warpBucket();
+            if (bkt > maxB) maxB = bkt;
+          }
+          if (x === -range) ctx.moveTo(x + warpDx, y + warpDy);
+          else ctx.lineTo(x + warpDx, y + warpDy);
+        }
+        if (cinematic) ctx.strokeStyle = GRID_STYLES[maxB];
+        ctx.stroke();
+      }
+    }
+
+    function drawTrails() {
+      const zoom = state.camera.zoom;
+      const cinematic = state.cinematic;
+      const nBodies = bodies.length;
+      for (let i = 0; i < nBodies; i++) {
+        const b = bodies[i];
+        const trail = b.trail;
+        const n = trail.length;
+        if (n < 2) continue;
+        ctx.strokeStyle = b.color;
+        if (!cinematic || b.type === "asteroid") {
+          ctx.globalCompositeOperation = "source-over";
+          ctx.lineCap = "butt";
+          ctx.lineWidth = 1.2 / zoom;
           ctx.globalAlpha = 0.35;
-          for (let i = 0; i < b.trail.length; i++) {
-            const p = b.trail[i];
-            if (i === 0) ctx.moveTo(p.x, p.y);
-            else ctx.lineTo(p.x, p.y);
-          }
+          ctx.beginPath();
+          ctx.moveTo(trail[0].x, trail[0].y);
+          for (let t = 1; t < n; t++) ctx.lineTo(trail[t].x, trail[t].y);
           ctx.stroke();
-          ctx.globalAlpha = 1.0;
+          continue;
         }
+        ctx.globalCompositeOperation = "lighter";
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.lineWidth = (b.type === "star" || b.type === "black_hole" ? 2.5 : 1.7) / zoom;
+        ctx.globalAlpha = 0.2;
+        ctx.beginPath();
+        ctx.moveTo(trail[0].x, trail[0].y);
+        for (let t = 1; t < n; t++) ctx.lineTo(trail[t].x, trail[t].y);
+        ctx.stroke();
+        const start = n > 12 ? n - 12 : 0;
+        ctx.globalAlpha = 0.8;
+        ctx.lineWidth = 1.35 / zoom;
+        ctx.beginPath();
+        ctx.moveTo(trail[start].x, trail[start].y);
+        for (let t = start + 1; t < n; t++) ctx.lineTo(trail[t].x, trail[t].y);
+        ctx.stroke();
       }
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = "source-over";
+    }
 
-      for (let b of bodies) {
-        if (b.type === "black_hole") {
-          const grad = ctx.createRadialGradient(b.x, b.y, b.radius * 0.8, b.x, b.y, b.radius * 2.8);
-          grad.addColorStop(0, "rgba(0,0,0,1)");
-          grad.addColorStop(0.4, "rgba(168,85,247,0.8)");
-          grad.addColorStop(1, "rgba(168,85,247,0)");
-          ctx.fillStyle = grad;
-          ctx.beginPath();
-          ctx.arc(b.x, b.y, b.radius * 2.8, 0, Math.PI * 2);
-          ctx.fill();
+    function drawStar(b) {
+      const pulse = 1 + 0.04 * Math.sin(visualTime * 2.3 + b.id * 0.01);
+      const glow = glowFor(b.color);
+      const s = b.radius * 3.5 * pulse;
+      ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = 0.42;
+      const wide = s * 1.7;
+      ctx.drawImage(glow, b.x - wide, b.y - wide, wide * 2, wide * 2);
+      ctx.globalAlpha = 0.9;
+      ctx.drawImage(glow, b.x - s, b.y - s, s * 2, s * 2);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = b.color;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.radius * pulse, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = STAR_CORE;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.radius * 0.42 * pulse, 0, Math.PI * 2);
+      ctx.fill();
+    }
 
-          ctx.fillStyle = "#000000";
+    function drawPlanet(b) {
+      if (b.type === "gas") {
+        const glow = glowFor(b.color);
+        const s = b.radius * 2.5;
+        ctx.globalCompositeOperation = "lighter";
+        ctx.globalAlpha = 0.5;
+        ctx.drawImage(glow, b.x - s, b.y - s, s * 2, s * 2);
+        ctx.globalCompositeOperation = "source-over";
+        ctx.globalAlpha = 1;
+      }
+      ctx.fillStyle = b.color;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
+      ctx.clip();
+      if (b.type === "gas") {
+        ctx.globalAlpha = 0.22;
+        ctx.strokeStyle = GAS_BAND;
+        ctx.lineWidth = Math.max(0.8, b.radius * 0.13);
+        const y0 = b.y - b.radius * 0.45;
+        for (let k = 0; k < 4; k++) {
+          const y = y0 + k * b.radius * 0.28;
           ctx.beginPath();
-          ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
-          ctx.fill();
-        } else {
-          if (ARCHETYPES[b.type]?.glow) {
-            ctx.shadowColor = ARCHETYPES[b.type].color;
-            ctx.shadowBlur = b.radius * 2.2;
+          ctx.moveTo(b.x - b.radius, y);
+          ctx.lineTo(b.x + b.radius, y);
+          ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+      }
+      ctx.drawImage(sphereSprite, b.x - b.radius, b.y - b.radius, b.radius * 2, b.radius * 2);
+      ctx.restore();
+    }
+
+    function drawBlackHole(b) {
+      const glow = glowFor(BH_GLOW);
+      const s = b.radius * 6.5;
+      ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = 0.8;
+      ctx.drawImage(glow, b.x - s, b.y - s, s * 2, s * 2);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.globalAlpha = 1;
+      ctx.save();
+      ctx.translate(b.x, b.y);
+      ctx.rotate(visualTime * 0.4);
+      ctx.scale(1, 0.36);
+      const d = b.radius * 5.4;
+      ctx.drawImage(diskSprite, -d, -d, d * 2, d * 2);
+      ctx.restore();
+      ctx.strokeStyle = PHOTON_RING;
+      ctx.lineWidth = Math.max(1.1 / state.camera.zoom, b.radius * 0.11);
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.radius * 1.32, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = "#000000";
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = HORIZON_EDGE;
+      ctx.lineWidth = 1 / state.camera.zoom;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.radius * 1.02, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    function drawAsteroid(b) {
+      ctx.fillStyle = b.color;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
+      ctx.fill();
+      if (b.radius >= 3) {
+        ctx.fillStyle = ASTEROID_HL;
+        ctx.beginPath();
+        ctx.arc(b.x - b.radius * 0.28, b.y - b.radius * 0.28, b.radius * 0.32, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    function drawBodies() {
+      const n = bodies.length;
+      if (!state.cinematic) {
+        for (let i = 0; i < n; i++) {
+          const b = bodies[i];
+          if (b.type === "black_hole") {
+            const grad = ctx.createRadialGradient(b.x, b.y, b.radius * 0.8, b.x, b.y, b.radius * 2.8);
+            grad.addColorStop(0, "rgba(0,0,0,1)");
+            grad.addColorStop(0.4, "rgba(168,85,247,0.8)");
+            grad.addColorStop(1, "rgba(168,85,247,0)");
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(b.x, b.y, b.radius * 2.8, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = "#000000";
+            ctx.beginPath();
+            ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
+            ctx.fill();
+          } else {
+            const spec = ARCHETYPES[b.type];
+            if (spec && spec.glow) {
+              ctx.shadowColor = spec.color;
+              ctx.shadowBlur = b.radius * 2.2;
+            }
+            ctx.fillStyle = b.color;
+            ctx.beginPath();
+            ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
           }
-          ctx.fillStyle = b.color;
-          ctx.beginPath();
-          ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.shadowBlur = 0;
         }
+        return;
       }
+      for (let i = 0; i < n; i++) {
+        const b = bodies[i];
+        if (b.type === "black_hole") drawBlackHole(b);
+        else if (b.type === "star") drawStar(b);
+        else if (b.type === "gas" || b.type === "rocky") drawPlanet(b);
+        else drawAsteroid(b);
+      }
+    }
 
+    function drawParticles() {
+      if (state.cinematic) ctx.globalCompositeOperation = "lighter";
       for (let i = particles.length - 1; i >= 0; i--) {
         const p = particles[i];
         p.x += p.vx;
@@ -505,22 +899,41 @@
         ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
         ctx.fill();
       }
-      ctx.globalAlpha = 1.0;
-      ctx.restore();
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = "source-over";
+    }
 
+    function draw() {
+      if (state.cinematic) drawBackdrop();
+      else {
+        ctx.fillStyle = "#050608";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      }
+
+      ctx.save();
+      ctx.translate(state.camera.x, state.camera.y);
+      ctx.scale(state.camera.zoom, state.camera.zoom);
+      if (state.showGrid) drawGrid();
+      if (state.showTrails) drawTrails();
+      drawBodies();
+      drawParticles();
+      ctx.restore();
       renderSlingshotHUD();
     }
 
     function computeGridWarp(x, y) {
-      let dx = 0, dy = 0;
-      for (let b of bodies) {
+      warpDx = 0;
+      warpDy = 0;
+      const n = bodies.length;
+      for (let i = 0; i < n; i++) {
+        const b = bodies[i];
         const distSq = (b.x - x) ** 2 + (b.y - y) ** 2 + 100;
         const pull = Math.min(b.mass * 0.08 / distSq, 14);
         const dist = Math.sqrt(distSq);
-        dx += ((b.x - x) / dist) * pull;
-        dy += ((b.y - y) / dist) * pull;
+        warpDx += ((b.x - x) / dist) * pull;
+        warpDy += ((b.y - y) / dist) * pull;
       }
-      return { dx, dy };
+      warpMag = Math.sqrt(warpDx * warpDx + warpDy * warpDy);
     }
 
     function renderSlingshotHUD() {
@@ -548,6 +961,13 @@
         const scr = worldToScreen(path[i].x, path[i].y);
         if (i === 0) hudCtx.moveTo(scr.x, scr.y);
         else hudCtx.lineTo(scr.x, scr.y);
+      }
+      if (state.cinematic) {
+        hudCtx.lineWidth = 4;
+        hudCtx.globalAlpha = 0.28;
+        hudCtx.stroke();
+        hudCtx.lineWidth = 1.5;
+        hudCtx.globalAlpha = 1;
       }
       hudCtx.stroke();
       hudCtx.setLineDash([]);
@@ -665,6 +1085,11 @@
       e.target.classList.toggle("active", state.showTrails);
     };
 
+    document.getElementById("btn-fx").onclick = (e) => {
+      state.cinematic = !state.cinematic;
+      e.target.classList.toggle("active", state.cinematic);
+    };
+
     document.getElementById("btn-audio").onclick = (e) => {
       state.audioEnabled = !state.audioEnabled;
       e.target.classList.toggle("active", state.audioEnabled);
@@ -689,6 +1114,7 @@
     let fpsTime = lastTime;
 
     function loop(now) {
+      visualTime = now * 0.001;
       if (!state.paused) {
         const subDt = DT / SUB_STEPS;
         for (let i = 0; i < SUB_STEPS; i++) stepPhysics(subDt);
