@@ -68,6 +68,7 @@
       <span>Simulation</span>
       <div class="btn-group">
         <button id="btn-pause">Pause</button>
+        <button id="btn-step">Step</button>
         <button id="btn-clear">Clear</button>
       </div>
     </div>
@@ -1059,6 +1060,13 @@
       state.paused = !state.paused;
       e.target.innerText = state.paused ? "Play" : "Pause";
       e.target.classList.toggle("active", state.paused);
+    };
+
+    document.getElementById("btn-step").onclick = () => {
+      if (state.paused) {
+        const subDt = DT / SUB_STEPS;
+        for (let i = 0; i < SUB_STEPS; i++) stepPhysics(subDt);
+      }
     };
 
     document.getElementById("btn-clear").onclick = () => { bodies = []; particles = []; };
